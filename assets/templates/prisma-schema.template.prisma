@@ -1,0 +1,118 @@
+// Template Prisma schema. Replace the domain models (Lead, Meeting, etc.)
+// with your own. Keep the Profile + WebhookEvent shape — they're domain-agnostic.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums (per-domain — replace these) ──────────────────────────────────
+enum LeadStatus {
+  NEW
+  MEETING_SCHEDULED
+  MEETING_COMPLETED
+  DEAL_CLOSED
+  DEAL_LOST
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
+// ─── Profile — domain-agnostic, keep this ────────────────────────────────
+// Mirrors auth.users.id; created by trigger on signup
+model Profile {
+  id                String   @id @db.Uuid
+  email             String   @unique
+  fullName          String?  @map("full_name")
+  // Optional: only needed if Cal.com integration is in scope
+  calOrganizerEmail String?  @map("cal_organizer_email")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Back-references — add one per owned table
+  leads     Lead[]
+  leadNotes LeadNote[]
+
+  @@map("profiles")
+}
+
+// ─── Domain models (replace with your own) ───────────────────────────────
+
+model Lead {
+  id         String     @id @default(uuid()) @db.Uuid
+  ownerId    String     @map("owner_id") @db.Uuid
+  owner      Profile    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fullName   String     @map("full_name")
+  email      String?
+  phone      String?
+  company    String?
+  websiteUrl String?    @map("website_url")
+  source     String?    @default("manual")
+  status     LeadStatus @default(NEW)
+  notes      String?
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  leadNotes LeadNote[]
+  meetings  Meeting[]
+
+  @@index([ownerId, status])
+  @@index([ownerId, createdAt])
+  @@index([ownerId, email])
+  @@map("leads")
+}
+
+model LeadNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  leadId    String   @map("lead_id") @db.Uuid
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  authorId  String   @map("author_id") @db.Uuid
+  author    Profile  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([leadId, createdAt])
+  @@map("lead_notes")
+}
+
+model Meeting {
+  id              String        @id @default(uuid()) @db.Uuid
+  leadId          String        @map("lead_id") @db.Uuid
+  lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  ownerId         String        @map("owner_id") @db.Uuid
+  scheduledAt     DateTime      @map("scheduled_at")
+  durationMinutes Int           @default(30) @map("duration_minutes")
+  status          MeetingStatus @default(SCHEDULED)
+  notes           String?
+  // Cal.com integration: this UNIQUE makes the upsert-by-cal-uid pattern work
+  calEventId      String?       @unique @map("cal_event_id")
+  meetingUrl      String?       @map("meeting_url")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@index([ownerId, scheduledAt])
+  @@index([leadId, scheduledAt])
+  @@map("meetings")
+}
+
+// ─── Webhook events — domain-agnostic, useful for ANY signed webhook ─────
+model WebhookEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  source      String                                       // 'cal.com', 'stripe', etc.
+  externalId  String    @map("external_id")
+  payload     Json
+  processedAt DateTime? @map("processed_at")
+  error       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([source, externalId])  // ← idempotency key
+  @@map("webhook_events")
+}
