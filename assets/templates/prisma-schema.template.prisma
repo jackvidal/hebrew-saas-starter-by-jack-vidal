@@ -1,5 +1,17 @@
-// Template Prisma schema. Replace the domain models (Lead, Meeting, etc.)
-// with your own. Keep the Profile + WebhookEvent shape — they're domain-agnostic.
+// ═══════════════════════════════════════════════════════════════════════════
+// Hebrew SaaS Starter — Prisma schema template
+// ═══════════════════════════════════════════════════════════════════════════
+// This is the FULL Leadero schema across all 5 build sessions. Trim per project:
+//   - Leads + LeadNote + WebsiteAnalysis    (always)
+//   - Meeting                                (if you have appointments / Cal.com)
+//   - Task                                   (if you have a TODO concept)
+//   - Call + CallSentiment + CallDirection   (if you log phone calls)
+//   - WhatsappMessage + 3 enums              (if WhatsApp via Wassender)
+//   - WebhookEvent                           (always if ANY signed webhook exists)
+//
+// On Profile: keep `calOrganizerEmail` for Cal.com routing, `whatsappNumber`
+// and `wassenderToken` for Wassender per-user routing.
+// ═══════════════════════════════════════════════════════════════════════════
 
 generator client {
   provider = "prisma-client-js"
@@ -11,7 +23,6 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ─── Enums (per-domain — replace these) ──────────────────────────────────
 enum LeadStatus {
   NEW
   MEETING_SCHEDULED
@@ -27,24 +38,69 @@ enum MeetingStatus {
   NO_SHOW
 }
 
-// ─── Profile — domain-agnostic, keep this ────────────────────────────────
-// Mirrors auth.users.id; created by trigger on signup
-model Profile {
-  id                String   @id @db.Uuid
-  email             String   @unique
-  fullName          String?  @map("full_name")
-  // Optional: only needed if Cal.com integration is in scope
-  calOrganizerEmail String?  @map("cal_organizer_email")
-  createdAt         DateTime @default(now()) @map("created_at")
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
 
-  // Back-references — add one per owned table
-  leads     Lead[]
-  leadNotes LeadNote[]
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallSentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum WhatsappDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WhatsappMessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  OTHER
+}
+
+enum WhatsappStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Profile {
+  id                  String   @id @db.Uuid
+  email               String   @unique
+  fullName            String?  @map("full_name")
+  calOrganizerEmail   String?  @map("cal_organizer_email")
+  whatsappNumber      String?  @map("whatsapp_number")
+  wassenderToken      String?  @map("wassender_token")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  leads             Lead[]
+  leadNotes         LeadNote[]
+  tasks             Task[]
+  calls             Call[]
+  whatsappMessages  WhatsappMessage[]
 
   @@map("profiles")
 }
-
-// ─── Domain models (replace with your own) ───────────────────────────────
 
 model Lead {
   id         String     @id @default(uuid()) @db.Uuid
@@ -61,12 +117,17 @@ model Lead {
   createdAt  DateTime   @default(now()) @map("created_at")
   updatedAt  DateTime   @updatedAt @map("updated_at")
 
-  leadNotes LeadNote[]
-  meetings  Meeting[]
+  leadNotes        LeadNote[]
+  meetings         Meeting[]
+  analyses         WebsiteAnalysis[]
+  tasks            Task[]
+  calls            Call[]
+  whatsappMessages WhatsappMessage[]
 
   @@index([ownerId, status])
   @@index([ownerId, createdAt])
   @@index([ownerId, email])
+  @@index([ownerId, phone])
   @@map("leads")
 }
 
@@ -92,7 +153,6 @@ model Meeting {
   durationMinutes Int           @default(30) @map("duration_minutes")
   status          MeetingStatus @default(SCHEDULED)
   notes           String?
-  // Cal.com integration: this UNIQUE makes the upsert-by-cal-uid pattern work
   calEventId      String?       @unique @map("cal_event_id")
   meetingUrl      String?       @map("meeting_url")
   createdAt       DateTime      @default(now()) @map("created_at")
@@ -103,16 +163,110 @@ model Meeting {
   @@map("meetings")
 }
 
-// ─── Webhook events — domain-agnostic, useful for ANY signed webhook ─────
+model Task {
+  id          String       @id @default(uuid()) @db.Uuid
+  ownerId     String       @map("owner_id") @db.Uuid
+  owner       Profile      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  leadId      String       @map("lead_id") @db.Uuid
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  dueDate     DateTime?    @map("due_date")
+  status      TaskStatus   @default(PENDING)
+  priority    TaskPriority @default(MEDIUM)
+  completedAt DateTime?    @map("completed_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@index([ownerId, status, dueDate])
+  @@index([leadId])
+  @@map("tasks")
+}
+
+model Call {
+  id              String        @id @default(uuid()) @db.Uuid
+  ownerId         String        @map("owner_id") @db.Uuid
+  owner           Profile       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  leadId          String        @map("lead_id") @db.Uuid
+  lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  direction       CallDirection
+  occurredAt      DateTime      @map("occurred_at")
+  durationSeconds Int?          @map("duration_seconds")
+  notes           String?
+  transcript      String?
+  audioUrl        String?       @map("audio_url")
+
+  // AI analysis fields (populated in Session 3; nullable until then)
+  summary              String?
+  keyTopics            Json?          @map("key_topics")
+  sentiment            CallSentiment?
+  sentimentReason      String?        @map("sentiment_reason")
+  prospectCommitments  Json?          @map("prospect_commitments")
+  myCommitments        Json?          @map("my_commitments")
+  recommendedNextSteps Json?          @map("recommended_next_steps")
+  redFlags             Json?          @map("red_flags")
+  analyzedAt           DateTime?      @map("analyzed_at")
+  modelUsed            String?        @map("model_used")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([ownerId, occurredAt])
+  @@index([leadId, occurredAt])
+  @@map("calls")
+}
+
+model WebsiteAnalysis {
+  id                   String   @id @default(uuid()) @db.Uuid
+  leadId               String   @map("lead_id") @db.Uuid
+  lead                 Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  url                  String
+  summary              String
+  issues               Json
+  opportunities        Json
+  recommendedServices  Json     @map("recommended_services")
+  recommendedNextSteps Json     @map("recommended_next_steps")
+  modelUsed            String   @map("model_used")
+  rawResponse          Json     @map("raw_response")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([leadId, createdAt])
+  @@map("website_analyses")
+}
+
+model WhatsappMessage {
+  id              String              @id @default(uuid()) @db.Uuid
+  ownerId         String              @map("owner_id") @db.Uuid
+  owner           Profile             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  leadId          String              @map("lead_id") @db.Uuid
+  lead            Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  direction       WhatsappDirection
+  messageType     WhatsappMessageType @default(TEXT) @map("message_type")
+  body            String?
+  mediaUrl        String?             @map("media_url")
+  fromNumber      String              @map("from_number")
+  toNumber        String              @map("to_number")
+  status          WhatsappStatus      @default(SENT)
+  externalId      String?             @unique @map("external_id")
+  sentAt          DateTime            @map("sent_at")
+  errorMessage    String?             @map("error_message")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  @@index([ownerId, sentAt])
+  @@index([leadId, sentAt])
+  @@map("whatsapp_messages")
+}
+
 model WebhookEvent {
   id          String    @id @default(uuid()) @db.Uuid
-  source      String                                       // 'cal.com', 'stripe', etc.
+  source      String
   externalId  String    @map("external_id")
   payload     Json
   processedAt DateTime? @map("processed_at")
   error       String?
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  @@unique([source, externalId])  // ← idempotency key
+  @@unique([source, externalId])
   @@map("webhook_events")
 }

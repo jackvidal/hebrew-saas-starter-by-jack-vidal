@@ -1,5 +1,3 @@
-// src/lib/auth.ts — getCurrentUser / requireUser
-
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
@@ -17,8 +15,8 @@ export async function getCurrentUser(): Promise<Profile | null> {
 
   if (!user) return null;
 
-  // Profile row should already exist (auth trigger creates it on signup),
-  // but be defensive in case the trigger was skipped.
+  // Profile row should already exist (trigger creates it on signup), but
+  // be defensive in case the trigger was skipped.
   let profile = await prisma.profile.findUnique({ where: { id: user.id } });
   if (!profile) {
     profile = await prisma.profile.upsert({

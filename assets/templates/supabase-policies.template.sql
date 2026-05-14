@@ -1,13 +1,12 @@
 -- ────────────────────────────────────────────────────────────────────────────
--- RLS policies template
--- Run after `prisma db push` (which creates the tables).
+-- JackCRM — Row Level Security policies
 --
--- Each owned table follows the same 4-policy pattern:
---   <table>_select_own / insert_own / update_own / delete_own
--- Plus the auto-profile-on-signup trigger.
+-- Run after `prisma db push` (which creates the tables).
+-- Each user can read/write only their own data via auth.uid().
+-- The webhook_events table is service-role only (no policies = deny by default).
 -- ────────────────────────────────────────────────────────────────────────────
 
--- ─── auth.users → public.profiles trigger ──────────────────────────────────
+-- ─── auth.users → public.profiles trigger (auto-create profile on signup) ──
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -43,7 +42,7 @@ DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
 CREATE POLICY "profiles_update_own" ON public.profiles
   FOR UPDATE USING (id = auth.uid());
 
--- ─── leads (replace with your domain table) ──────────────────────────────
+-- ─── leads ────────────────────────────────────────────────────────────────
 ALTER TABLE public.leads ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "leads_select_own" ON public.leads;
@@ -62,7 +61,7 @@ DROP POLICY IF EXISTS "leads_delete_own" ON public.leads;
 CREATE POLICY "leads_delete_own" ON public.leads
   FOR DELETE USING (owner_id = auth.uid());
 
--- ─── lead_notes (child table — scoped through parent) ────────────────────
+-- ─── lead_notes (scoped through parent lead) ─────────────────────────────
 ALTER TABLE public.lead_notes ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "lead_notes_select_own" ON public.lead_notes;
@@ -101,6 +100,84 @@ DROP POLICY IF EXISTS "meetings_delete_own" ON public.meetings;
 CREATE POLICY "meetings_delete_own" ON public.meetings
   FOR DELETE USING (owner_id = auth.uid());
 
--- ─── webhook_events (service role only — no policies = deny by default) ──
+-- ─── website_analyses (scoped through parent lead) ───────────────────────
+ALTER TABLE public.website_analyses ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "website_analyses_select_own" ON public.website_analyses;
+CREATE POLICY "website_analyses_select_own" ON public.website_analyses
+  FOR SELECT USING (
+    EXISTS (SELECT 1 FROM public.leads l WHERE l.id = lead_id AND l.owner_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "website_analyses_insert_own" ON public.website_analyses;
+CREATE POLICY "website_analyses_insert_own" ON public.website_analyses
+  FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM public.leads l WHERE l.id = lead_id AND l.owner_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "website_analyses_delete_own" ON public.website_analyses;
+CREATE POLICY "website_analyses_delete_own" ON public.website_analyses
+  FOR DELETE USING (
+    EXISTS (SELECT 1 FROM public.leads l WHERE l.id = lead_id AND l.owner_id = auth.uid())
+  );
+
+-- ─── tasks ───────────────────────────────────────────────────────────────
+ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "tasks_select_own" ON public.tasks;
+CREATE POLICY "tasks_select_own" ON public.tasks
+  FOR SELECT USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "tasks_insert_own" ON public.tasks;
+CREATE POLICY "tasks_insert_own" ON public.tasks
+  FOR INSERT WITH CHECK (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "tasks_update_own" ON public.tasks;
+CREATE POLICY "tasks_update_own" ON public.tasks
+  FOR UPDATE USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "tasks_delete_own" ON public.tasks;
+CREATE POLICY "tasks_delete_own" ON public.tasks
+  FOR DELETE USING (owner_id = auth.uid());
+
+-- ─── calls ───────────────────────────────────────────────────────────────
+ALTER TABLE public.calls ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "calls_select_own" ON public.calls;
+CREATE POLICY "calls_select_own" ON public.calls
+  FOR SELECT USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "calls_insert_own" ON public.calls;
+CREATE POLICY "calls_insert_own" ON public.calls
+  FOR INSERT WITH CHECK (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "calls_update_own" ON public.calls;
+CREATE POLICY "calls_update_own" ON public.calls
+  FOR UPDATE USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "calls_delete_own" ON public.calls;
+CREATE POLICY "calls_delete_own" ON public.calls
+  FOR DELETE USING (owner_id = auth.uid());
+
+-- ─── whatsapp_messages ───────────────────────────────────────────────────
+ALTER TABLE public.whatsapp_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "whatsapp_messages_select_own" ON public.whatsapp_messages;
+CREATE POLICY "whatsapp_messages_select_own" ON public.whatsapp_messages
+  FOR SELECT USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "whatsapp_messages_insert_own" ON public.whatsapp_messages;
+CREATE POLICY "whatsapp_messages_insert_own" ON public.whatsapp_messages
+  FOR INSERT WITH CHECK (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "whatsapp_messages_update_own" ON public.whatsapp_messages;
+CREATE POLICY "whatsapp_messages_update_own" ON public.whatsapp_messages
+  FOR UPDATE USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "whatsapp_messages_delete_own" ON public.whatsapp_messages;
+CREATE POLICY "whatsapp_messages_delete_own" ON public.whatsapp_messages
+  FOR DELETE USING (owner_id = auth.uid());
+
+-- ─── webhook_events (service role only) ───────────────────────────────────
 ALTER TABLE public.webhook_events ENABLE ROW LEVEL SECURITY;
--- Service role bypasses RLS; users can't see anything.
+-- No policies = no rows visible to the anon/authenticated roles. Service role bypasses RLS.

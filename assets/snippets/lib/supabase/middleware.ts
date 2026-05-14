@@ -1,9 +1,6 @@
-// src/lib/supabase/middleware.ts — session refresh + auth gate
-
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// EDIT THESE for your project's protected sections
 const PROTECTED_PREFIXES = ["/dashboard", "/leads", "/meetings", "/settings"];
 const AUTH_PAGES = ["/login", "/signup"];
 

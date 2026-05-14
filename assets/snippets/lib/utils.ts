@@ -1,5 +1,3 @@
-// src/lib/utils.ts — Hebrew-locale formatters + cn helper
-
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
